@@ -17,6 +17,13 @@ Form Card enables you to integrate highly customizable forms into your dashboard
 
 ---
 
+## ⚠️  UI BUG FOR PEOPLE USING `card-mod`! ⚠️
+
+Having issues with the UI editor when using card-mod with form-card?
+A PR which fixes this issue [has been submitted](https://github.com/thomasloven/lovelace-card-mod/pull/442), and will hopefully be merged soon.
+
+---
+
 ## Features
 
 - **Dynamic Form Field Support**: Build forms with various input types using [Home Assistant selectors][home-assistant-selector-docs].
