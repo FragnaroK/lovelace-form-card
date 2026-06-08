@@ -16,7 +16,7 @@ function getTranslatedString(key: string, lang: string): string | undefined {
 
   const values = key.split(".");
   const translatedString = values.reduce(
-    (prev, curr) => (prev as Record<string, unknown>)?.[curr], 
+    (o, i) => (o as Record<string, unknown>)?.[i], 
     languages[lang]
   );
 

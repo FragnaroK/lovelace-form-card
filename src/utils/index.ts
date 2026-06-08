@@ -5,4 +5,5 @@ export * from "./loader";
 export * from "./card-styles";
 export * from "./custom-cards";
 export * from "./ws-templates";
-export * from "./has-template";
+export * from "./templates";
+export * from "./schema";
