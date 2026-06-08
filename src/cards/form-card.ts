@@ -50,6 +50,8 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
 
   @state() private _yamlMode = false;
 
+  @state() private _saveStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
+
   setConfig(config: FormCardConfig) {
     if (!config.fields) {
       throw new Error("You need to define form fields");
@@ -284,8 +286,13 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     const formData = this._formDataProcessed;
     const title = this._getProcessedValue("title");
     const hasPendingChanges = this._hasPendingChanges();
+    const hasWarnings = this._warnings!.length > 0 && this._warnings![0] !== undefined
     const fill_container = false;
     const save_label = this._getProcessedValue("save_label") ?? this.hass.localize("ui.common.save");
+
+    const warnings = hasWarnings ? html` <ul>
+                      ${this._warnings!.map((warning) => html`<li>${warning}</li>`)}
+                    </ul>` : nothing;
 
     return html`
       <ha-card
@@ -298,14 +305,10 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
         <div class="card-content">
           ${this._warnings
             ? html`<ha-alert alert-type="warning" .title=${this.hass.localize("ui.errors.config.editor_not_supported")}>
-                ${this._warnings!.length > 0 && this._warnings![0] !== undefined
-                  ? html` <ul>
-                      ${this._warnings!.map((warning) => html`<li>${warning}</li>`)}
-                    </ul>`
-                  : ""}
+                ${warnings}
                 ${this.hass.localize("ui.errors.config.edit_in_yaml_supported")}
               </ha-alert>`
-            : ""}
+            : nothing}
           <ha-form
             .hass=${this.hass}
             .schema=${this._processedSchema}
@@ -387,10 +390,13 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     fireEvent(this, "value-changed", { value });
   }
 
-  public async performAction(actionConfig: ActionConfig, value: any) {
+  public async performAction(actionConfig: ActionConfig | undefined | null, value: any) {
+    if (!actionConfig) return;
+
     if (actionConfig.action !== "call-service" && actionConfig.action !== "perform-action") {
       return;
     }
+
     const variables = {
       value,
     };
@@ -415,38 +421,57 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     await this._performAction(updatedActionConfig, value);
   }
 
+  public async performActions(actionsConfig: ActionConfig[] | undefined | null, value: any) {
+    if (!actionsConfig || actionsConfig.length <= 0) return;
+
+    for (const action of actionsConfig) 
+      await this.performAction(action, value);
+  }
+
   private async _handleSave(ev: CustomEvent) {
     const button = ev.target as HaProgressButton;
-    if (button.progress) {
+    if (button.progress || this._saveStatus === 'loading') {
       return;
     }
-    if (!this._config?.save_action) {
+    if (!this._config?.save_actions) {
       return;
     }
+
     const customLocalize = setupCustomlocalize(this.hass!);
     const formData = this._formData;
-    const allRequiredInfoFilledIn =
-      formData === undefined
-        ? // If no data filled in, just check that any field is required
-          this._processedSchema.find((field) => field.required) === undefined
-        : // If data is filled in, make sure all required fields are
-          formData &&
-          this._processedSchema.every((field) => !field.required || !["", undefined].includes(formData![field.name]));
 
-    if (!allRequiredInfoFilledIn) {
+     // Check if no data filled in
+    const isFormEmpty = formData === undefined;
+    const areThereRequiredFileds = this._processedSchema.some(field => field.required);
+    const requiredFieldsEmpty = areThereRequiredFileds && this._processedSchema.every(field => field.required && ["", undefined].includes(formData![field.name]))
+
+    if ((isFormEmpty && areThereRequiredFileds) || requiredFieldsEmpty) {
       this._errorMsg = customLocalize("card.not_all_required_fields");
+      await this.performActions(this._config.error_actions, this._errorMsg ?? "");
       return;
     }
 
     button.progress = true;
+    this._saveStatus = 'loading';
     this._errorMsg = undefined;
+    await this.performActions(this._config.progress_actions, "");
 
     try {
+
       // const processedValue = this._getProcessedFormValue()?.data;
       const processedValue = this._formData;
-      await this.performAction(this._config.save_action, processedValue);
+      await this.performActions(this._config.save_actions, processedValue);
+
 
       button.actionSuccess();
+      this._saveStatus = 'success';
+
+      // Handle on success action
+      if (this._config.success_actions) {
+        await this.performActions(this._config.success_actions, processedValue);
+      }
+
+      // Handle reset on submit
       if (this._config.reset_on_submit) {
         this._resetChanges();
       } else {
@@ -455,6 +480,8 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     } catch (err: any) {
       button.actionError();
       this._errorMsg = err.message;
+      this._saveStatus = 'error';
+      await this.performActions(this._config.error_actions, err.message);
     } finally {
       button.progress = false;
     }
@@ -514,16 +541,23 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
           padding-top: 16px;
         }
         .card-actions {
-          text-align: right;
+          text-align: center;
           height: 48px;
-          display: flex;
-          justify-content: flex-end;
+          display: flex !important;
+          justify-content: space-between;
           align-items: center;
-          margin-top: 16px;
+          flex-direction: row;
+          gap: 10px;
+          margin-bottom: 10px;
+        } 
+
+        .card-actions > * {
+          flex: 1;
         }
-        .card-content > *:not(:first-child) {
+
+        .card-content > *:not(:first-child, .card-actions) {
           display: block;
-          margin-top: 16px;
+          margin-top: 8px;
         }
       `,
     ];

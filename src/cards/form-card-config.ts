@@ -11,7 +11,10 @@ export interface FormCardConfig extends LovelaceCardConfig {
   title?: string;
   fields: FormCardField[];
   save_label?: string;
-  save_action?: ActionConfig;
+  save_actions?: ActionConfig[];
+  error_actions?: ActionConfig[];
+  success_actions?: ActionConfig[];
+  progress_actions?: ActionConfig[];
   spread_values_to_data?: boolean;
   reset_on_submit?: boolean;
   hide_undo_button?: boolean;
