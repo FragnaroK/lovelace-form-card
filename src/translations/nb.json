@@ -11,17 +11,20 @@
       },
       "actions_heading": {
         "title": "Handlinger",
-        "description": "actions description"
+        "description": "Handlingsbeskrivelse",
+        "success_actions": "Suksesshandlinger",
+        "error_actions": "Feilhandlinger",
+        "progress_actions": "Progresjonshandlinger"
       },
       "form_heading": {
-        "title": "Card configuration",
-        "description": "Configure the card."
+        "title": "Kortkonfigurasjon",
+        "description": "Konfigurer kortet."
       },
       "layout_picker": {
         "values": {
-          "default": "Default layout",
-          "vertical": "Vertical layout",
-          "horizontal": "Horizontal layout"
+          "default": "Standard layout",
+          "vertical": "Vertikal layout",
+          "horizontal": "Horisontal layout"
         }
       }
     },
@@ -36,8 +39,8 @@
         "icon_type": "Ikon-type",
         "content_info": "Innhold",
         "use_entity_picture": "Bruk entitet-bilde?",
-        "collapsible_controls": "Collapse controls when off",
-        "icon_animation": "Animate icon when active?",
+        "collapsible_controls": "Skjul kontroller når av",
+        "icon_animation": "Animer ikon når aktiv?",
         "delete": "Slett"
       },
       "fields": {
@@ -63,6 +66,6 @@
     }
   },
   "card": {
-    "not_found": "Entity not found"
+    "not_found": "Entitet ble ikke funnet"
   }
 }

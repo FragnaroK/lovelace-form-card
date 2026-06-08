@@ -1,0 +1,71 @@
+{
+  "editor": {
+    "form": {
+      "field": {
+        "add_fields": "Añadir campos",
+        "add_field": "Añadir campo"
+      },
+      "fields_heading": {
+        "title": "Campos",
+        "description": ""
+      },
+      "actions_heading": {
+        "title": "Acciones",
+        "description": "Descripción de las acciones",
+        "success_actions": "Acciones de éxito",
+        "error_actions": "Acciones de error",
+        "progress_actions": "Acciones en progreso"
+      },
+      "form_heading": {
+        "title": "Configuración de la tarjeta",
+        "description": "Configura la tarjeta."
+      },
+      "layout_picker": {
+        "values": {
+          "default": "Diseño por defecto",
+          "vertical": "Diseño vertical",
+          "horizontal": "Diseño horizontal"
+        }
+      }
+    },
+    "card": {
+      "generic": {
+        "color": "Color",
+        "icon_color": "Color del icono",
+        "layout": "Diseño",
+        "fill_container": "Llenar contenedor",
+        "primary_info": "Información primaria",
+        "secondary_info": "Información secundaria",
+        "icon_type": "Tipo de icono",
+        "content_info": "Contenido",
+        "use_entity_picture": "¿Usar imagen de la entidad?",
+        "collapsible_controls": "Colapsar controles cuando esté apagado",
+        "icon_animation": "¿Animar icono cuando esté activo?",
+        "delete": "Eliminar"
+      },
+      "fields": {
+        "entity": "Entidad",
+        "value": "Valor",
+        "default": "Valor por defecto",
+        "label": "Etiqueta",
+        "description": "Descripción",
+        "title": "Título",
+        "layout": "Diseño",
+        "disabled": "Deshabilitado",
+        "save_label": "Etiqueta del botón guardar",
+        "spread_values_to_data": "Dispersar valores del formulario",
+        "reset_on_submit": "Restablecer formulario al guardar",
+        "hide_undo_button": "Ocultar botón deshacer",
+        "save_action": "Acción al guardar",
+        "change_action": "Acción al cambiar",
+        "edit_ui": "Editar en editor visual",
+        "edit_yaml": "Editar en YAML",
+        "show_state": "Mostrar estado",
+        "show_icon": "Mostrar icono"
+      }
+    }
+  },
+  "card": {
+    "not_found": "Entidad no encontrada"
+  }
+}
