@@ -1,101 +1,112 @@
 import type { Selector } from "home-assistant-types/dist/data/selector";
 import type { HaFormSchema } from "home-assistant-types/dist/components/ha-form/types";
 
-export const computeInitialHaFormData = (schema: HaFormSchema[] | readonly HaFormSchema[]): Record<string, any> => {
-  const data = {};
+const FIELD_TYPE_DEFAULTS: Record<string, any> = {
+  boolean: false,
+  string: "",
+  float: 0.0,
+  positive_time_period_dict: { hours: 0, minutes: 0, seconds: 0 },
+};
+
+const SIMPLE_SELECTOR_DEFAULTS: Record<string, any> = {
+  boolean: false,
+  addon: "", attribute: "", file: "", icon: "", template: "", text: "", theme: "", object: "",
+  time: "00:00:00",
+  color_rgb: [0, 0, 0],
+};
+
+const getSelectorDefault = (selector: Selector, key: string): any => {
+  if (key in SIMPLE_SELECTOR_DEFAULTS) return SIMPLE_SELECTOR_DEFAULTS[key];
+
+  const config = (selector as any)[key];
+
+  switch (key) {
+    case "device":
+    case "entity":
+    case "area":
+    case "label":
+      return config?.multiple ? [] : "";
+    case "number":
+      return config?.min ?? 0;
+    case "select": {
+      if (!config?.options?.length) return undefined;
+      const firstOpt = config.options[0];
+      const val = typeof firstOpt === "string" ? firstOpt : firstOpt.value;
+      return config.multiple ? [val] : val;
+    }
+    case "country":
+      return config?.countries?.[0];
+    case "language":
+      return config?.languages?.[0];
+    case "duration":
+      return { hours: 0, minutes: 0, seconds: 0 };
+    case "date":
+    case "datetime":
+      return `${new Date().toISOString().slice(0, 10)}T00:00:00`;
+    case "color_temp":
+      return config?.min_mireds ?? 153;
+    case "action":
+    case "trigger":
+    case "condition":
+      return [];
+    case "media":
+    case "target":
+      return {};
+    default:
+      throw new Error(`Selector "${key}" not supported in initial form data`);
+  }
+};
+
+
+export const computeInitialHaFormData = (
+  schema: HaFormSchema[] | readonly HaFormSchema[]
+): Record<string, any> => {
+  const data: Record<string, any> = {};
+
   schema.forEach((field) => {
     if (field.description?.suggested_value !== undefined && field.description?.suggested_value !== null) {
       data[field.name] = field.description.suggested_value;
-    } else if ("default" in field) {
+      return;
+    }
+    if ("default" in field) {
       data[field.name] = field.default;
-    } else if (!field.required) {
-      // Do nothing.
-    } else if (field.type === "boolean") {
-      data[field.name] = false;
-    } else if (field.type === "string") {
-      data[field.name] = "";
-    } else if (field.type === "integer") {
-      data[field.name] = "valueMin" in field ? field.valueMin : 0;
-    } else if (field.type === "constant") {
-      data[field.name] = field.value;
-    } else if (field.type === "float") {
-      data[field.name] = 0.0;
-    } else if (field.type === "select") {
-      if (field.options.length) {
-        const val = field.options[0];
+      return;
+    }
+
+    if (!field.required) return;
+
+    // Ensure field.type is defined AND check if it exists in defaults object
+    if (field.type && field.type in FIELD_TYPE_DEFAULTS) {
+      data[field.name] = FIELD_TYPE_DEFAULTS[field.type];
+    }
+    // Update subsequent checks to use standard string checks instead of 'in'
+    else if (field.type === "integer") {
+      data[field.name] = "valueMin" in field ? (field as any).valueMin : 0;
+    }
+    else if (field.type === "constant") {
+      data[field.name] = (field as any).value;
+    }
+    else if (field.type === "expandable") {
+      data[field.name] = computeInitialHaFormData((field as any).schema);
+    }
+    else if (field.type === "select") {
+      if ((field as any).options?.length) {
+        const val = (field as any).options[0];
         data[field.name] = Array.isArray(val) ? val[0] : val;
       }
-    } else if (field.type === "positive_time_period_dict") {
-      data[field.name] = {
-        hours: 0,
-        minutes: 0,
-        seconds: 0,
-      };
-    } else if (field.type === "expandable") {
-      data[field.name] = computeInitialHaFormData(field.schema);
-    } else if ("selector" in field) {
-      const selector: Selector = field.selector;
+    }
 
-      if ("device" in selector) {
-        data[field.name] = selector.device?.multiple ? [] : "";
-      } else if ("entity" in selector) {
-        data[field.name] = selector.entity?.multiple ? [] : "";
-      } else if ("area" in selector) {
-        data[field.name] = selector.area?.multiple ? [] : "";
-      } else if ("label" in selector) {
-        data[field.name] = selector.label?.multiple ? [] : "";
-      } else if ("boolean" in selector) {
-        data[field.name] = false;
-      } else if (
-        "addon" in selector ||
-        "attribute" in selector ||
-        "file" in selector ||
-        "icon" in selector ||
-        "template" in selector ||
-        "text" in selector ||
-        "theme" in selector ||
-        "object" in selector
-      ) {
-        data[field.name] = "";
-      } else if ("number" in selector) {
-        data[field.name] = selector.number?.min ?? 0;
-      } else if ("select" in selector) {
-        if (selector.select?.options.length) {
-          const firstOption = selector.select.options[0];
-          const val = typeof firstOption === "string" ? firstOption : firstOption.value;
-          data[field.name] = selector.select.multiple ? [val] : val;
-        }
-      } else if ("country" in selector) {
-        if (selector.country?.countries?.length) {
-          data[field.name] = selector.country.countries[0];
-        }
-      } else if ("language" in selector) {
-        if (selector.language?.languages?.length) {
-          data[field.name] = selector.language.languages[0];
-        }
-      } else if ("duration" in selector) {
-        data[field.name] = {
-          hours: 0,
-          minutes: 0,
-          seconds: 0,
-        };
-      } else if ("time" in selector) {
-        data[field.name] = "00:00:00";
-      } else if ("date" in selector || "datetime" in selector) {
-        const now = new Date().toISOString().slice(0, 10);
-        data[field.name] = `${now}T00:00:00`;
-      } else if ("color_rgb" in selector) {
-        data[field.name] = [0, 0, 0];
-      } else if ("color_temp" in selector) {
-        data[field.name] = selector.color_temp?.min_mireds ?? 153;
-      } else if ("action" in selector || "trigger" in selector || "condition" in selector) {
-        data[field.name] = [];
-      } else if ("media" in selector || "target" in selector) {
-        data[field.name] = {};
-      } else {
-        throw new Error(`Selector ${Object.keys(selector)[0]} not supported in initial form data`);
+    // Handle selectors natively
+    else if ("selector" in field) {
+      const selector: Selector = field.selector;
+      const activeSelectorKey = Object.keys(selector)[0];
+
+      if (activeSelectorKey) {
+        const value = getSelectorDefault(selector, activeSelectorKey);
+        if (value !== undefined) data[field.name] = value;
       }
     }
   });
+
   return data;
 };
