@@ -1,97 +1,36 @@
 import type { CSSResultGroup, PropertyValues } from "lit";
 import { html, css, LitElement, nothing } from "lit";
-import { customElement, property, state, query } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { assert } from "superstruct";
 import type { HomeAssistant } from "home-assistant-types";
+// Correct path to fetch configuration structs safely from your sibling directory card layer
+import type { FormCardEditorFieldRow } from "../components/form-card-editor-field-row";
 import type { LovelaceConfig } from "home-assistant-types/dist/data/lovelace/config/types";
 import type { LovelaceCardEditor } from "home-assistant-types/dist/panels/lovelace/types";
-import type { LocalizeFunc } from "home-assistant-types/dist/common/translations/localize";
 import type { HaFormSchema } from "home-assistant-types/dist/components/ha-form/types";
-import type { UiAction } from "home-assistant-types/dist/panels/lovelace/components/hui-action-editor";
 
 import memoizeOne from "memoize-one";
-import { FORM_CARD_EDITOR_NAME } from "../const";
-import type { FormCardConfig, FormCardFields } from "./form-card-config";
+import { FORM_CARD_EDITOR_NAME } from "../const"; // Correct path relative to src/cards/
+import type { FormCardConfig, FormCardField } from "./form-card-config";
 import { formCardConfigStruct } from "./form-card-config";
 import setupCustomlocalize from "../localize";
-
-import type { FormCardEditorFields } from "../components/form-card-editor-fields";
 import { fireEvent, loadConfigDashboard, loadHaComponents } from "../utils";
-import { computeActionsFormSchema } from "../shared/config";
-import { GENERIC_LABELS } from "../utils/form/generic-fields";
 
-import "../components/form-card-editor-fields";
-
-const actions: UiAction[] = ["none", "perform-action"];
-
-// Fixed: Separate base structural options from core action schemas
-const computeBaseSchema = memoizeOne((t: LocalizeFunc): HaFormSchema[] => [
-  {
-    name: "title",
-    selector: { text: {} },
-  },
-  {
-    type: "expandable",
-    title: t("editor.form.actions_heading.title"),
-    headingLevel: 2,
-    expanded: true,
-    icon: "mdi:script-text-play-outline",
-    name: "",
-    schema: [
-      {
-        name: "save_label",
-        selector: { text: {} },
-      },
-      {
-        name: "spread_values_to_data",
-        selector: { boolean: {} },
-      },
-      {
-        name: "reset_on_submit",
-        selector: { boolean: {} },
-      },
-      {
-        name: "hide_undo_button",
-        selector: { boolean: {} },
-      },
-      // Fixed: Mapped plural multi-action hooks into UI schema layout selectors
-      ...computeActionsFormSchema("save_actions", actions),
-      ...computeActionsFormSchema("progress_actions", actions),
-      ...computeActionsFormSchema("success_actions", actions),
-      ...computeActionsFormSchema("error_actions", actions),
-    ],
-  },
-]);
+// CRITICAL FIX: Step out of src/cards/ and go into src/components/ to find your fields manager file!
+import "../components/form-card-editor-fields"; 
 
 @customElement(FORM_CARD_EDITOR_NAME)
 export class FormCardEditor extends LitElement implements LovelaceCardEditor {
   @property({ attribute: false }) public hass!: HomeAssistant;
-
   @property({ attribute: false }) public lovelace?: LovelaceConfig;
 
-  @property({ type: Boolean }) public narrow = false;
+  @property({ attribute: false }) public _config?: FormCardConfig;
+  @state() private _activeTab = "settings"; // "settings" or "fields"
 
-  @property({ type: Boolean }) public disabled = false;
-
-  @state() private _config?: FormCardConfig;
-
-  @query("form-card-editor-fields")
-  private _formFields?: FormCardEditorFields;
-
-  private _openFields = true;
-
-  protected updated(changedProps: PropertyValues) {
-    if (this._openFields && changedProps.has("config")) {
-      this._openFields = true;
-      this._formFields?.updateComplete.then(() => {
-        this._formFields?.focusLastField();
-      });
-    }
-  }
-
-  protected firstUpdated(changedProps: PropertyValues): void {
-    super.firstUpdated(changedProps);
-    void this.hass.loadFragmentTranslation("config");
+  public setConfig(config: FormCardConfig): void {
+    assert(config, formCardConfigStruct);
+    this._config = config;
+    this.requestUpdate();
   }
 
   connectedCallback() {
@@ -100,135 +39,119 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
     void loadConfigDashboard();
   }
 
-  public setConfig(config: FormCardConfig): void {
-    assert(config, formCardConfigStruct);
-    this._config = config;
-  }
+  // Type-safe schema mappings with strings packed into permitted 'context' records
+  private _renderSettingsSchema = memoizeOne((): HaFormSchema[] => [
+    {
+      name: "title",
+      selector: { text: {} },
+      context: { label: "Card Title" }
+    },
+    {
+      name: "columns",
+      selector: { number: { min: 1, max: 12, mode: "slider", step: 1 } },
+      context: { label: "Layout Grid Max Columns" }
+    },
+    {
+      name: "confirmation",
+      selector: { text: { multiline: true } },
+      context: { label: "Dynamic Confirmation Warning Message" }
+    },
+    {
+      name: "save_label",
+      selector: { text: {} },
+      context: { label: "Submit Button Text" }
+    },
+    {
+      name: "reset_on_submit",
+      selector: { boolean: {} },
+      context: { label: "Clear Form Data Upon Submission Success" }
+    },
+    {
+      name: "hide_undo_button",
+      selector: { boolean: {} },
+      context: { label: "Hide Form Reset/Undo Button" }
+    },
+  ]);
 
-  private _computeLabel = (schema: HaFormSchema) => {
-    const customLocalize = setupCustomlocalize(this.hass!);
-
-    if (GENERIC_LABELS.includes(schema.name)) {
-      return customLocalize(`editor.card.fields.${schema.name}`) ?? schema.name;
-    }
-    return this.hass!.localize(`ui.panel.lovelace.editor.card.generic.${schema.name}`) ?? schema.name;
+  private _computeLabel = (schema: HaFormSchema): string => {
+    if (schema.context?.label) return schema.context.label;
+    return schema.name 
+      ? schema.name.charAt(0).toUpperCase() + schema.name.slice(1).replace(/_/g, " ") 
+      : "";
   };
 
   protected render() {
-    if (!this.hass || !this._config) {
-      return nothing;
-    }
-    const localize = setupCustomlocalize(this.hass!);
-    const baseSchema = computeBaseSchema(localize);
+    if (!this.hass || !this._config) return nothing;
+
+    const tabs = [
+      { id: "settings", icon: "mdi:cog", label: "Card Settings" },
+      { id: "fields", icon: "mdi:form-select", label: "Manage Fields" },
+    ];
 
     return html`
-      <div class="header">
-        <h2 id="fields-heading" class="name">${localize("editor.form.fields_heading.title")}</h2>
-      </div>
-      
-      <form-card-editor-fields
-        role="region"
-        aria-labelledby="fields-heading"
-        .fields=${this._config?.fields}
-        .disable=${this.disabled}
-        .hass=${this.hass}
-        @value-changed=${this._fieldsChanged}
-      ></form-card-editor-fields>
-      
-      ${!("fields" in this._config)
-        ? html`
-            <ha-button
-              outlined
-              @click=${this._addFields}
-              .disabled=${this.disabled}
-              .label=${localize("editor.form.field.add_fields")}
+      <div class="tabs">
+        ${tabs.map(
+          (tab) => html`
+            <button
+              class="tab ${this._activeTab === tab.id ? "active" : ""}"
+              @click=${() => { this._activeTab = tab.id; }}
             >
-              <ha-icon icon="mdi:form-text-box" slot="icon"></ha-icon>
-            </ha-button>
+              <ha-icon .icon=${tab.icon}></ha-icon>
+              ${tab.label}
+            </button>
           `
-        : nothing}
-        
-      <div class="header">
-        <h2 id="form-heading" class="name">${localize("editor.form.form_heading.title")}</h2>
+        )}
       </div>
-      
-      <ha-form
-        aria-labelledby="form-heading"
-        .hass=${this.hass}
-        .data=${this._config}
-        .schema=${baseSchema}
-        .computeLabel=${this._computeLabel}
-        @value-changed=${this._valueChanged}
-      ></ha-form>
+
+      <div class="panel-content">
+        ${this._activeTab === "settings"
+          ? html`
+              <ha-form
+                .hass=${this.hass}
+                .data=${this._config}
+                .schema=${this._renderSettingsSchema()}
+                .computeLabel=${this._computeLabel}
+                @value-changed=${this._cardSettingsChanged}
+              ></ha-form>
+            `
+          : html`
+              <form-card-editor-fields
+                .hass=${this.hass}
+                .fields=${this._config.fields ?? []}
+                .maxColumns=${this._config.columns ?? 4}
+                @value-changed=${this._fieldsListMutated}
+              ></form-card-editor-fields>
+            `}
+      </div>
     `;
   }
 
-  private _addFields() {
-    if (this._config && "fields" in this._config) {
-      return;
-    }
-    this._formFields?.addFields();
-  }
-
-  private _fieldsChanged(ev: CustomEvent): void {
+  // Add this method hook handler to pass structural field modifications up into Lovelace's context
+  private _fieldsListMutated(ev: CustomEvent) {
     ev.stopPropagation();
-    const value = {
-      ...this._config!,
-      fields: ev.detail.value as FormCardFields,
-    };
-    fireEvent(this, "config-changed", { config: value });
+    if (!this._config) return;
+
+    fireEvent(this, "config-changed", { 
+      config: { ...this._config, fields: ev.detail.value } 
+    });
   }
 
-  private _valueChanged(ev: CustomEvent) {
-    fireEvent(this, "config-changed", { config: ev.detail.value });
+  private _cardSettingsChanged(ev: CustomEvent) {
+    ev.stopPropagation();
+    if (!this._config) return;
+    
+    const updatedConfig = { ...this._config, ...ev.detail.value };
+    fireEvent(this, "config-changed", { config: updatedConfig });
   }
 
   static get styles(): CSSResultGroup {
-    return [
-      css`
-        :host {
-          display: block;
-        }
-
-        ha-card {
-          overflow: hidden;
-        }
-
-        .description {
-          margin: 0;
-        }
-
-        p {
-          margin-bottom: 0;
-        }
-
-        .header {
-          display: flex;
-          align-items: center;
-          margin-top: 16px;
-        }
-
-        .header:first-child {
-          margin-top: -16px;
-        }
-
-        .header .name {
-          font-size: 20px;
-          font-weight: 400;
-          flex: 1;
-          margin: 8px 0;
-        }
-
-        .header a {
-          color: var(--secondary-text-color);
-        }
-        
-        ha-form {
-          display: block;
-          margin-top: 8px;
-        }
-      `,
-    ];
+    return css`
+      .tabs { display: flex; border-bottom: 1px solid var(--divider-color); margin-bottom: 16px; gap: 8px; }
+      .tab { background: none; border: none; padding: 10px 16px; cursor: pointer; font-weight: 500; color: var(--secondary-text-color); display: flex; align-items: center; gap: 8px; border-bottom: 2px solid transparent; font-size: 14px; }
+      .tab:hover { color: var(--primary-text-color); }
+      .tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+      .panel-content { padding: 4px 0; }
+    `;
   }
 }
 

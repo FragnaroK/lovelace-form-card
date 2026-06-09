@@ -1,425 +1,229 @@
-// noinspection ES6UnusedImports
-
 import type { CSSResultGroup, PropertyValues } from "lit";
 import { LitElement, css, html, nothing } from "lit";
-import { customElement, property, query, state } from "lit/decorators.js";
-import { classMap } from "lit/directives/class-map.js";
-import memoizeOne from "memoize-one";
-
+import { customElement, property, state } from "lit/decorators.js";
+import { mdiDelete, mdiChevronDown, mdiChevronUp, mdiEye, mdiEyeOff } from "@mdi/js";
 import type { HomeAssistant } from "home-assistant-types";
-import type { SchemaUnion } from "home-assistant-types/dist/components/ha-form/types";
-import type { HaYamlEditor } from "home-assistant-types/dist/components/ha-yaml-editor";
-import type { HaExpansionPanel } from "home-assistant-types/dist/components/ha-expansion-panel";
-
-import { mdiDelete, mdiDotsVertical, mdiPlaylistEdit, mdiArrowUp, mdiArrowDown } from "@mdi/js";
-import { haStyle } from "../shared/styles";
-
-import { hasTemplate, fireEvent, slugify, cardStyle } from "../utils";
+import type { HaFormSchema } from "home-assistant-types/dist/components/ha-form/types";
 import type { FormCardField } from "../cards/form-card-config";
-import setupCustomlocalize from "../localize";
-import { GENERIC_LABELS } from "../utils/form/generic-fields";
-import { handleStructError } from "../shared/config";
-
-const preventDefault = (ev: any) => ev.preventDefault();
-const stopPropagation = (ev: any) => ev.stopPropagation();
+import { fireEvent } from "../utils";
 
 @customElement("form-card-editor-field-row")
 export class FormCardEditorFieldRow extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
-
-  @property() public key!: string;
-
-  @property({ attribute: false, type: Array }) public excludeKeys: string[] = [];
-
   @property({ attribute: false }) public field!: FormCardField;
+  @property({ type: Number }) public index!: number;
+  @property({ type: Number }) public maxColumns = 4;
 
-  @property({ type: Boolean }) public narrow = false;
+  @state() private _expanded = false;
 
-  @property({ type: Boolean }) public first?: boolean;
-
-  @property({ type: Boolean }) public last?: boolean;
-
-  @property({ type: Boolean }) public disabled = false;
-
-  @state() private _uiError?: Record<string, string>;
-
-  @state() private _yamlError?: undefined | "yaml_error" | "key_not_unique";
-
-  @state() private _warnings?: string[];
-
-  @state() private _uiModeAvailable = true;
-
-  @state() private _yamlMode = false;
-
-  @query("ha-yaml-editor") private _yamlEditor?: HaYamlEditor;
-
-  private _errorKey?: string;
-
-  private _schema = memoizeOne(
-    () =>
-      [
-        {
-          type: "grid",
-          name: "",
-          schema: [
-            {
-              name: "name",
-              selector: { text: { autocomplete: "off" } },
-            },
-            {
-              name: "label",
-              selector: { text: { autocomplete: "off" } },
-            },
-          ],
-        },
-        {
-          name: "selector",
-          selector: { selector: {} },
-        },
-        {
-          type: "grid",
-          name: "",
-          schema: [
-            {
-              name: "description",
-              selector: { text: { autocomplete: "off" } },
-            },
-            {
-              name: "default",
-              selector: { text: { autocomplete: "off" } },
-            },
-          ],
-        },
-        {
-          name: "entity",
-          selector: { entity: {} },
-        },
-        {
-          type: "grid",
-          name: "",
-          schema: [
-            {
-              name: "disabled",
-              selector: { boolean: {} },
-            },
-            {
-              name: "required",
-              selector: { boolean: {} },
-            },
-          ],
-        },
-      ] as const
-  );
-
-  protected willUpdate(changedProperties: PropertyValues) {
-    if (!changedProperties.has("field")) {
-      return;
-    }
-    const field = this.field;
-    this._uiModeAvailable = !hasTemplate(field);
-
-    if (!this._uiModeAvailable && !this._yamlMode) {
-      this._yamlMode = true;
-    }
-  }
-
-  protected updated(changedProperties: PropertyValues) {
-    if (!changedProperties.has("field")) {
-      return;
-    }
-    if (this._yamlMode) {
-      const yamlEditor = this._yamlEditor;
-      if (yamlEditor && JSON.stringify(yamlEditor.value) !== JSON.stringify([this.field])) {
-        yamlEditor.setValue([this.field]);
-      }
-    }
-  }
-
-  public expand() {
-    this.updateComplete.then(() => {
-      this.shadowRoot!.querySelector("ha-expansion-panel")!.expanded = true;
-    });
-  }
+  private _computeLabel = (schema: HaFormSchema): string => {
+    if (schema.context?.label) return schema.context.label;
+    return schema.name ? schema.name.charAt(0).toUpperCase() + schema.name.slice(1).replace(/_/g, " ") : "";
+  };
 
   protected render() {
-    const schema = this._schema();
-    const data = { ...this.field, name: this._errorKey ?? this.key };
-    const yamlValue = [this.field];
-    const localize = setupCustomlocalize(this.hass!);
-    const headerLabel = this._computeHeaderLabel(data);
+    if (!this.field) return nothing;
 
-    // @ts-ignore
+    const span = this.field.grid_span ?? 1;
+    const hasCondition = !!this.field.depends_on;
+
     return html`
-      <ha-card outlined>
-        <ha-expansion-panel leftChevron>
-          <h3 slot="header">${headerLabel}</h3>
-          <slot name="icons" slot="icons"></slot>
-          <ha-button-menu
-            slot="icons"
-            @action=${this._handleAction}
-            @closed=${stopPropagation}
-            @click=${preventDefault}
-            fixed
-          >
-            <ha-icon-button slot="trigger" .label=${localize("ui.common.menu")} .path=${mdiDotsVertical}>
-            </ha-icon-button>
-            <ha-list-item graphic="icon" .disabled=${this.disabled || this.first}>
-              ${localize("ui.panel.config.automation.editor.move_up")}
-              <ha-svg-icon slot="graphic" .path=${mdiArrowUp}></ha-svg-icon
-            ></ha-list-item>
-
-            <ha-list-item graphic="icon" .disabled=${this.disabled || this.last}>
-              ${localize("ui.panel.config.automation.editor.move_down")}
-              <ha-svg-icon slot="graphic" .path=${mdiArrowDown}></ha-svg-icon>
-            </ha-list-item>
-
-            <ha-list-item graphic="icon" .disabled=${!this._uiModeAvailable}>
-              ${localize(`ui.panel.config.automation.editor.edit_${!this._yamlMode ? "yaml" : "ui"}`)}
-              <ha-svg-icon slot="graphic" .path=${mdiPlaylistEdit}></ha-svg-icon>
-            </ha-list-item>
-
-            <li divider role="separator"></li>
-
-            <ha-list-item class="warning" graphic="icon" .disabled=${this.disabled}>
-              ${localize("editor.card.generic.delete")}
-              <ha-svg-icon class="warning" slot="graphic" .path=${mdiDelete}></ha-svg-icon>
-            </ha-list-item>
-          </ha-button-menu>
-          <div class=${classMap({ "card-content": true })}>
-            ${this._warnings
-              ? html`<ha-alert
-                  alert-type="warning"
-                  .title=${this.hass.localize("ui.errors.config.editor_not_supported")}
-                >
-                  ${this._warnings!.length > 0 && this._warnings![0] !== undefined
-                    ? html` <ul>
-                        ${this._warnings!.map((warning) => html`<li>${warning}</li>`)}
-                      </ul>`
-                    : ""}
-                  ${this.hass.localize("ui.errors.config.edit_in_yaml_supported")}
-                </ha-alert>`
-              : ""}
-            ${this._yamlMode
-              ? html` ${this._yamlError
-                    ? html` <ha-alert alert-type="error">
-                        ${this.hass.localize(`ui.panel.config.script.editor.field.${this._yamlError}`)}
-                      </ha-alert>`
-                    : nothing}
-                  <ha-yaml-editor
-                    .hass=${this.hass}
-                    .defaultValue=${yamlValue}
-                    @value-changed=${this._onYamlChange}
-                  ></ha-yaml-editor>`
-              : html` <ha-form
-                  .schema=${schema}
-                  .data=${data}
-                  .error=${this._uiError}
-                  .hass=${this.hass}
-                  .disabled=${this.disabled}
-                  .computeLabel=${this._computeLabelCallback}
-                  .computeError=${this._computeError}
-                  @value-changed=${this._valueChanged}
-                  @ui-mode-not-available=${this._handleUiModeNotAvailable}
-                ></ha-form>`}
+      <div class="field-card ${this._expanded ? "expanded" : ""}">
+        <div class="field-header">
+          <div class="drag-handle-container">
+            <slot name="handle"></slot>
           </div>
-        </ha-expansion-panel>
-      </ha-card>
+          
+          <div class="field-summary" @click=${() => { this._expanded = !this._expanded; }}>
+            <span class="field-index">#${this.index + 1}</span>
+            <span class="field-title">${this.field.label || this.field.name || "Unnamed Field"}</span>
+            <span class="field-slug">${this.field.name}</span>
+          </div>
+
+          <div class="field-badges">
+            <span class="badge span-badge">Span: ${span}/${this.maxColumns}</span>
+            ${hasCondition ? html`<span class="badge cond-badge"><ha-svg-icon .path=${mdiEyeOff}></ha-svg-icon> Conditional</span>` : nothing}
+          </div>
+
+          <div class="field-actions">
+            <ha-icon-button
+              .path=${this._expanded ? mdiChevronUp : mdiChevronDown}
+              @click=${() => { this._expanded = !this._expanded; }}
+            ></ha-icon-button>
+            <ha-icon-button
+              class="delete-btn"
+              .path=${mdiDelete}
+              @click=${this._onDelete}
+            ></ha-icon-button>
+          </div>
+        </div>
+
+        ${this._expanded
+          ? html`
+              <div class="field-body">
+                <ha-form
+                  .hass=${this.hass}
+                  .data=${this.field}
+                  .computeLabel=${this._computeLabel}
+                  .schema=${[
+                    { name: "name", selector: { text: {} }, context: { label: "Unique Identifier Slug (lowercase, no spaces)" } },
+                    { name: "label", selector: { text: {} }, context: { label: "Display Label text" } },
+                    { name: "description", selector: { text: {} }, context: { label: "Helper / Description Text" } },
+                    {
+                      name: "grid_span",
+                      selector: { number: { min: 1, max: this.maxColumns, mode: "slider", step: 1 } },
+                      context: { label: "Column Width Grid Span Allocation" }
+                    },
+                    { name: "depends_on", selector: { text: {} }, context: { label: "Conditional Parent Field Name (Optional)" } },
+                    { name: "show_if_value", selector: { text: {} }, context: { label: "Display Only When Parent Equals Value" } }
+                  ] as any}
+                  @value-changed=${this._onFieldMutation}
+                ></ha-form>
+              </div>
+            `
+          : nothing}
+      </div>
     `;
   }
 
-  private _handleUiModeNotAvailable(ev: CustomEvent) {
-    // Prevent possible parent action-row from switching to yamlMode
+private _onFieldMutation(ev: CustomEvent) {
     ev.stopPropagation();
-
-    this._warnings = handleStructError(this.hass, ev.detail).warnings;
-    if (!this._yamlMode) {
-      this._yamlMode = true;
+    const mutations = { ...ev.detail.value };
+    if (mutations.grid_span) {
+      mutations.grid_span = Number(mutations.grid_span);
     }
+    
+    // FIX: Dispatch a standard native custom event to bubble the payload and index safely
+    this.dispatchEvent(
+      new CustomEvent("field-changed", {
+        detail: { value: mutations, index: this.index },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
-  private async _handleAction(ev: CustomEvent) {
-    switch (ev.detail.index) {
-      case 0:
-        fireEvent(this, "move-up");
-        break;
-      case 1:
-        fireEvent(this, "move-down");
-        break;
-      case 2:
-        this._yamlMode = !this._yamlMode;
-        this.expand();
-        break;
-      case 3:
-        this._onDelete();
-        break;
-    }
-  }
-
-  private _onDelete() {
-    if (confirm(this.hass.localize("ui.panel.config.script.editor.field_delete_confirm_text"))) {
-      fireEvent(this, "value-changed", { value: null });
-    }
-  }
-
-  private _onYamlChange(ev: CustomEvent) {
+  private _onDelete(ev: Event) {
     ev.stopPropagation();
-    if (!ev.detail.isValid) {
-      return;
-    }
-    const value = (ev.detail.value as FormCardField[])[0];
-
-    if (typeof value !== "object") {
-      this._yamlError = "yaml_error";
-      return;
-    }
-    const key = value.name;
-    if (this.excludeKeys.includes(key)) {
-      this._yamlError = "key_not_unique";
-      return;
-    }
-    this._yamlError = undefined;
-
-    const newValue = { ...value };
-
-    fireEvent(this, "value-changed", { value: newValue });
+    
+    // FIX: Dispatch a standard native custom event to pass the deletion message up safely
+    this.dispatchEvent(
+      new CustomEvent("field-deleted", {
+        detail: { index: this.index },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
-
-  private _maybeSetKey(value: FormCardField): void {
-    const labelChanged = value.label !== this.field.label;
-    const keyChanged = value.name !== this.key;
-    if (!labelChanged || keyChanged) {
-      return;
-    }
-    const slugifyLabel = this.field.label
-      ? slugify(this.field.label)
-      : this.hass.localize("ui.panel.config.script.editor.field.field") || "field";
-    const regex = new RegExp(`^${slugifyLabel}(_\\d)?$`);
-    if (regex.test(this.key)) {
-      let key = !value.name
-        ? this.hass.localize("ui.panel.config.script.editor.field.field") || "field"
-        : slugify(value.name);
-      if (this.excludeKeys.includes(key as string)) {
-        let uniqueKey = key;
-        let i = 2;
-        do {
-          uniqueKey = `${key}_${i}`;
-          i++;
-        } while (this.excludeKeys.includes(uniqueKey));
-        key = uniqueKey;
-      }
-      value.name = key;
-    }
-  }
-
-  private _valueChanged(ev: CustomEvent) {
-    ev.stopPropagation();
-    const value = ev.detail.value as FormCardField;
-    this._maybeSetKey(value);
-
-    // Don't allow to set an empty key, or duplicate an existing key.
-    if (!value.name || this.excludeKeys.includes(value.name)) {
-      this._uiError = value.name
-        ? {
-            key: "key_not_unique",
-          }
-        : {
-            key: "key_not_null",
-          };
-      this._errorKey = value.name ?? "";
-      return;
-    }
-    this._errorKey = undefined;
-    this._uiError = undefined;
-
-    // If we render the default with an incompatible selector, it risks throwing an exception and not rendering.
-    // Clear the default when changing the selector type.
-    if (Object.keys(this.field.selector!)[0] !== Object.keys(value.selector)[0]) {
-      delete value.default;
-    }
-
-    fireEvent(this, "value-changed", { value });
-  }
-
-  private _computeHeaderLabel(field: FormCardField) {
-    let labelPrefix = "";
-    if (field.selector) {
-      const selectorType = Object.keys(field.selector)[0];
-      labelPrefix = this.hass.localize(`ui.components.selectors.selector.types.${selectorType}`) ?? "";
-    }
-    return `${labelPrefix ? `${labelPrefix}: ` : ""}${field.name}`;
-  }
-
-  private _computeLabelCallback = (schema: SchemaUnion<ReturnType<typeof this._schema>>): string => {
-    const customLocalize = setupCustomlocalize(this.hass!);
-    if (GENERIC_LABELS.includes(schema.name)) {
-      return customLocalize(`editor.card.fields.${schema.name}`);
-    }
-    return this.hass.localize(`ui.panel.config.script.editor.field.${schema.name}`);
-  };
-
-  private _computeError = (error: string) =>
-    this.hass.localize(`ui.panel.config.script.editor.field.${error}` as any) || error;
 
   static get styles(): CSSResultGroup {
-    return [
-      haStyle,
-      cardStyle,
-      css`
-        ha-button-menu,
-        ha-icon-button {
-          --mdc-theme-text-primary-on-background: var(--primary-text-color);
-        }
-
-        .disabled {
-          opacity: 0.5;
-          pointer-events: none;
-        }
-
-        ha-expansion-panel {
-          --expansion-panel-summary-padding: 0 0 0 8px;
-          --expansion-panel-content-padding: 0;
-        }
-        .card-content {
-          padding: 16px;
-        }
-        .disabled-bar {
-          background: var(--divider-color, #e0e0e0);
-          text-align: center;
-          border-top-right-radius: var(--ha-card-border-radius, 12px);
-          border-top-left-radius: var(--ha-card-border-radius, 12px);
-        }
-        mwc-list-item[disabled] {
-          --mdc-theme-text-primary-on-background: var(--disabled-text-color);
-        }
-        mwc-list-item.hidden {
-          display: none;
-        }
-        .warning ul {
-          margin: 4px 0;
-        }
-
-        .root > :not([own-margin]):not(:last-child) {
-          margin-bottom: 24px;
-        }
-
-        h3 {
-          margin: 0;
-          font-size: inherit;
-          font-weight: inherit;
-        }
-
-        .action-icon {
-          display: none;
-        }
-
-        li[role="separator"] {
-          border-bottom-color: var(--divider-color);
-        }
-      `,
-    ];
+    return css`
+      .field-card {
+        border: 1px solid var(--divider-color);
+        border-radius: 12px;
+        background-color: var(--card-background-color, var(--background-color-2));
+        margin-bottom: 12px;
+        overflow: hidden;
+        transition: all 0.25s ease-in-out;
+        box-shadow: var(--ha-card-box-shadow, none);
+      }
+      .field-card:hover {
+        border-color: var(--primary-color);
+      }
+      .field-card.expanded {
+        border-color: var(--primary-color);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      }
+      .field-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        gap: 12px;
+        min-height: 48px;
+      }
+      .drag-handle-container {
+        display: flex;
+        align-items: center;
+        color: var(--secondary-text-color);
+      }
+      .field-summary {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        overflow: hidden;
+      }
+      .field-index {
+        font-weight: bold;
+        color: var(--primary-color);
+        font-family: monospace;
+        font-size: 14px;
+        background: var(--secondary-background-color);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .field-title {
+        font-weight: 500;
+        color: var(--primary-text-color);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+      .field-slug {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        font-family: monospace;
+        background: rgba(var(--rgb-primary-text-color), 0.05);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      .field-badges {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .badge {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 20px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .span-badge {
+        background-color: rgba(var(--rgb-primary-color), 0.1);
+        color: var(--primary-color);
+      }
+      .cond-badge {
+        background-color: #fff3e0;
+        color: #e65100;
+      }
+      .cond-badge ha-svg-icon {
+        width: 14px;
+        height: 14px;
+      }
+      .field-actions {
+        display: flex;
+        align-items: center;
+      }
+      .delete-btn {
+        color: var(--error-color, #db4437);
+      }
+      .field-body {
+        padding: 20px;
+        border-top: 1px solid var(--divider-color);
+        background-color: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.4);
+      }
+      ha-form {
+        display: block;
+      }
+    `;
   }
 }
-
 declare global {
   interface HTMLElementTagNameMap {
     "form-card-editor-field-row": FormCardEditorFieldRow;

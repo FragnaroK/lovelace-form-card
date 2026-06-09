@@ -1,6 +1,7 @@
 import { css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
+import { styleMap } from "lit/directives/style-map.js";
 import type { CSSResultGroup, PropertyValues } from "lit";
 import type { HomeAssistant } from "home-assistant-types";
 import type { LovelaceCard, LovelaceCardEditor } from "home-assistant-types/dist/panels/lovelace/types";
@@ -27,15 +28,15 @@ import {
 import setupCustomlocalize from "../localize";
 
 import { FORM_CARD_EDITOR_NAME, FORM_CARD_NAME } from "../const";
+import "./form-card-editor";
 import type { FormCardConfig, FormCardField } from "./form-card-config";
-import { handleStructError } from "../shared/config";
 import { FormBaseCard } from "../shared/form-base-card";
 import { computeInitialHaFormData } from "../utils/form/compute-initial-ha-form-data";
 
 registerCustomCard({
   type: FORM_CARD_NAME,
   name: "Form Card",
-  description: "Card to build forms",
+  description: "Card to build forms with grid engine and dependencies",
 });
 
 @customElement(FORM_CARD_NAME)
@@ -43,17 +44,11 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
   protected readonly _formType = "card";
 
   @property({ attribute: false }) public hass!: HomeAssistant;
-
   @state() protected _config?: FormCardConfig;
-
   @state() private _processedSchema: HaFormSchema[] = [];
-
   @state() private _errorMsg?: string;
-
   @state() private _warnings?: string[] = [];
-
   @state() private _yamlMode = false;
-
   @state() private _saveStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
 
   setConfig(config: FormCardConfig) {
@@ -63,6 +58,7 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     this._config = { ...config };
   }
 
+  
   public async connectedCallback(): Promise<void> {
     super.connectedCallback();
     void loadHaComponents();
@@ -75,7 +71,6 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
   }
 
   public disconnectedCallback(): void {
-    // Structural Guard: Unsubscribe templates on DOM teardown to prevent severe WebSocket leaks
     for (const [key, unsubPromise] of this._unsubRenderTemplates.entries()) {
       unsubPromise.then((unsub) => unsub?.());
       this._unsubRenderTemplates.delete(key);
@@ -87,38 +82,26 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     super.updated(changedProps);
     if (!this.hass || !this._config) return;
 
-    if (changedProps.has("hass") || changedProps.has("_config")) {
-      this._tryConnect().then(() => {
-        this._processedSchema = this._schema(this._config!.fields);
-      });
-    }
-
-    if (changedProps.has("_templateResults")) {
+    if (changedProps.has("hass") || changedProps.has("_config") || changedProps.has("_templateResults")) {
       this._processedSchema = this._schema(this._config.fields);
     }
   }
 
-  public static async getConfigElement(): Promise<LovelaceCardEditor> {
-    await import("./form-card-editor");
-    await loadHaComponents();
-    await loadDeveloperToolsTemplate();
+  public static  getConfigElement(): LovelaceCardEditor {
+    void loadHaComponents();
+    void loadDeveloperToolsTemplate();
     return document.createElement(FORM_CARD_EDITOR_NAME) as LovelaceCardEditor;
   }
 
-  public static async getStubConfig(hass: HomeAssistant): Promise<FormCardConfig> {
+  public static  getStubConfig(hass: HomeAssistant): FormCardConfig {
     const entities = Object.keys(hass.states);
     const entity_id = entities[0] ?? "unknown.entity";
     const field_name = entity_id.substring(0, 15);
     const field_key = slugify(field_name);
     return {
       type: `custom:${FORM_CARD_NAME}`,
-      fields: [
-        {
-          name: field_key,
-          label: field_name,
-          selector: { text: {} },
-        },
-      ],
+      columns: 2,
+      fields: [{ name: field_key, label: field_name, selector: { text: {} } }],
     };
   }
 
@@ -128,9 +111,8 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
 
   private async _tryConnect(): Promise<void> {
     if (!this._config) return;
-
     const foundTemplates = findTemplatesInObject(this._config);
-    const promises = foundTemplates.map(([path, template]) => 
+    const promises = foundTemplates.map(([path, template]) =>
       this._tryConnectTemplate(undefined, path, template)
     );
     await Promise.all(promises);
@@ -138,7 +120,6 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
 
   private async _tryConnectTemplate(fieldId: string | undefined, path: string, template: string): Promise<void> {
     const templateKey = getTemplateKey(fieldId, path);
-
     if (this._unsubRenderTemplates.has(templateKey) || !this.hass) return;
 
     const variables = {
@@ -148,29 +129,18 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
       entity: undefined as string | undefined,
     };
 
-    if (!fieldId && templateKey.split(".")[0] === "fields") {
-      fieldId = templateKey.split(".")[1];
-      variables.entity = this._getProcessedValue(`fields.${fieldId}.entity`);
-    }
-
     try {
       const sub = subscribeRenderTemplate(
         this.hass.connection,
         (result) => {
-          this._templateResults = {
-            ...this._templateResults,
-            [templateKey]: result as RenderTemplateResult,
-          };
+          this._templateResults = { ...this._templateResults, [templateKey]: result as RenderTemplateResult };
         },
         { template, variables, strict: true, report_errors: true }
       );
       this._unsubRenderTemplates.set(templateKey, sub);
       await sub;
     } catch (err) {
-      this._templateResults = {
-        ...this._templateResults,
-        [templateKey]: { result: "Subscription failed" } as RenderTemplateResult,
-      };
+      this._templateResults = { ...this._templateResults, [templateKey]: { result: "Subscription failed" } as RenderTemplateResult };
       this._unsubRenderTemplates.delete(templateKey);
     }
   }
@@ -178,8 +148,6 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
   private _processTemplatedObject(fieldId: string, obj: any, pathPrefix = ""): any {
     if (!obj) return obj;
     const prefix = pathPrefix ? `${pathPrefix}.` : "";
-    
-    // Performance Optimization: Cache object template allocations outside recursive evaluation loop
     const cachedTemplates = findTemplatesInObject(obj);
 
     const processValue = (value: any): any => {
@@ -192,50 +160,51 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
         }
         return value;
       }
-
       if (typeof value === "object" && value !== null) {
-        if (Array.isArray(value)) {
-          return value.map((item) => processValue(item));
-        }
-        return Object.fromEntries(
-          Object.entries(value).map(([k, v]) => [k, processValue(v)])
-        );
+        if (Array.isArray(value)) return value.map((item) => processValue(item));
+        return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, processValue(v)]));
       }
       return value;
     };
-
     return processValue(obj);
   }
 
+  // Feature 3: Dynamic Multi-Select Form Dependencies
   private _schema(fields: FormCardField[]): HaFormSchema[] {
-    return fields.map((field) => {
-      const templatedField = this._processTemplatedObject(field.name, field, "fields");
+    const currentData = this._formData ?? {};
 
-      if (templatedField.entity && !templatedField.default) {
-        const entity_id = templatedField.entity;
-        const base = this.hass.states[entity_id];
-        const entity = base || {
-          entity_id: "binary_sensor.",
-          attributes: { icon: "no:icon", friendly_name: "" },
-          state: "off",
-        };
-        templatedField.default = entity?.state ?? undefined;
-      }
+    return fields
+      .filter((field) => {
+        if (field.depends_on) {
+          const dependentValue = currentData[field.depends_on];
+          if (field.show_if_value !== undefined && dependentValue !== field.show_if_value) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((field) => {
+        const templatedField = this._processTemplatedObject(field.name, field, "fields");
 
-      return {
-        name: field.name,
-        selector: templatedField.selector,
-        required: templatedField.required,
-        disabled: templatedField.disabled,
-        default: templatedField.default,
-        description: templatedField.placeholder ? { suggested_value: templatedField.placeholder } : undefined,
-        context: {
-          label: templatedField.label,
-          description: templatedField.description,
-          entity: templatedField.entity,
-        },
-      } as HaFormSelector;
-    });
+        if (templatedField.entity && !templatedField.default) {
+          const base = this.hass.states[templatedField.entity];
+          if (base) templatedField.default = base.state;
+        }
+
+        return {
+          name: field.name,
+          selector: templatedField.selector,
+          required: templatedField.required,
+          disabled: templatedField.disabled,
+          default: templatedField.default,
+          description: templatedField.placeholder ? { suggested_value: templatedField.placeholder } : undefined,
+          context: {
+            label: templatedField.label,
+            description: templatedField.description,
+            entity: templatedField.entity,
+          },
+        } as HaFormSelector;
+      });
   }
 
   private get _formDataProcessed() {
@@ -254,8 +223,15 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     const hasWarnings = (this._warnings?.length ?? 0) > 0;
     const fill_container = this._config.fill_container ?? false;
     const save_label = this._getProcessedValue("save_label") ?? this.hass.localize("ui.common.save");
-
     const errorMsg = this._errorMsg ? html`<div class="error" role="alert">${this._errorMsg}</div>` : nothing;
+
+    // Feature 1: Explicit Grid Configuration Engine
+    const gridColumns = this._config.columns ?? 1;
+    const gridStyles = styleMap({
+      display: "grid",
+      gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+      gap: "16px",
+    });
 
     return html`
       <ha-card .header=${title} class=${classMap({ "fill-container": fill_container, "no-header": !title })}>
@@ -263,21 +239,33 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
           ${hasWarnings ? html`
             <ha-alert alert-type="warning" .title=${this.hass.localize("ui.errors.config.editor_not_supported")}>
               <ul>${this._warnings!.map((warning) => html`<li>${warning}</li>`)}</ul>
-              ${this.hass.localize("ui.errors.config.edit_in_yaml_supported")}
             </ha-alert>
           ` : nothing}
           
-          <ha-form
-            .hass=${this.hass}
-            .schema=${this._processedSchema}
-            .data=${formData}
-            .error=${this._errorMsg}
-            .computeLabel=${computeLabel}
-            .computeHelper=${computeHelper}
-            .computeError=${this._computeError}
-            @value-changed=${this._formDataChanged}
-            @ui-mode-not-available=${this._handleUiModeNotAvailable}
-          ></ha-form>
+          <div style=${gridStyles}>
+            ${this._processedSchema.map((schemaItem) => {
+      // Extract matching field parameters to calculate custom spans instantly
+      const fieldOrigin = this._config!.fields.find(f => f.name === schemaItem.name);
+      const itemSpan = fieldOrigin?.grid_span ?? 1;
+      const itemStyles = styleMap({
+        gridColumn: `span ${Math.min(itemSpan, gridColumns)}`,
+      });
+
+      return html`
+                <div style=${itemStyles}>
+                  <ha-form
+                    .hass=${this.hass}
+                    .schema=${[schemaItem]}
+                    .data=${formData}
+                    .computeLabel=${computeLabel}
+                    .computeHelper=${computeHelper}
+                    .computeError=${this._computeError}
+                    @value-changed=${this._formDataChanged}
+                  ></ha-form>
+                </div>
+              `;
+    })}
+          </div>
           
           ${errorMsg}
           
@@ -301,16 +289,10 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     if (!this._debugData) return nothing;
     return html`
       <ha-expansion-panel class="debug">
-        <span slot="header">Debug</span>
+        <span slot="header">Debug Data</span>
         <ha-yaml-editor read-only auto-update .value=${this._debugData}></ha-yaml-editor>
       </ha-expansion-panel>
     `;
-  }
-
-  private _handleUiModeNotAvailable(ev: CustomEvent) {
-    ev.stopPropagation();
-    this._warnings = handleStructError(this.hass, ev.detail).warnings;
-    if (!this._yamlMode) this._yamlMode = true;
   }
 
   private readonly _computeError = (error: string) => error;
@@ -318,13 +300,17 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
   private _resetChanges(): void {
     if (this._initialValue) {
       this._formData = structuredClone(this._initialValue);
+      this._processedSchema = this._schema(this._config!.fields);
       fireEvent(this, "value-changed", { value: this._formData });
     }
   }
 
+  // Pure data synchronization event hook
   private _formDataChanged(ev: CustomEvent) {
     ev.stopPropagation();
-    this._formData = { ...ev.detail.value };
+    // Maintain state consistency by safely merging fields over our source dictionary record
+    this._formData = { ...this._formData, ...ev.detail.value };
+    this._processedSchema = this._schema(this._config!.fields);
     fireEvent(this, "value-changed", { value: this._formData });
   }
 
@@ -344,11 +330,7 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
       )
     );
 
-    const updatedActionConfig = {
-      ...actionConfig,
-      data: Object.fromEntries(processedData),
-    };
-
+    const updatedActionConfig = { ...actionConfig, data: Object.fromEntries(processedData) };
     await this._performAction(updatedActionConfig, value);
   }
 
@@ -368,13 +350,25 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
 
     const isFormEmpty = formData === undefined;
     const areThereRequiredFields = this._processedSchema.some(field => field.required);
-    const requiredFieldsEmpty = areThereRequiredFields && 
+    const requiredFieldsEmpty = areThereRequiredFields &&
       this._processedSchema.every(field => field.required && ["", undefined].includes(formData?.[field.name]));
 
     if ((isFormEmpty && areThereRequiredFields) || requiredFieldsEmpty) {
       this._errorMsg = customLocalize("card.not_all_required_fields");
       await this.performActions(this._config?.error_actions, this._errorMsg ?? "");
       return;
+    }
+
+    if (this._config?.confirmation) {
+      let confirmMessage = this._config.confirmation;
+      if (formData) {
+        Object.entries(formData).forEach(([key, val]) => {
+          confirmMessage = confirmMessage.replace(new RegExp(`{{\\s*value.${key}\\s*}}`, 'g'), String(val ?? ''));
+        });
+      }
+
+      const confirmHook = window.confirm(confirmMessage);
+      if (!confirmHook) return;
     }
 
     this._saveStatus = 'loading';
@@ -409,50 +403,22 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
     return [
       cardStyle,
       css`
-        ha-settings-row {
-          --paper-time-input-justify-content: flex-end;
-          --settings-row-content-width: 100%;
-          --settings-row-prefix-display: contents;
-          border-top: var(--service-control-items-border-top, 1px solid var(--divider-color));
+        .error { color: var(--error-color, red); font-weight: 500; margin-top: 8px; }
+        ha-card { max-width: 600px; margin: 0 auto; height: 100%; justify-content: space-between; flex-direction: column; display: flex; }
+        .card-content { display: flex; justify-content: space-between; flex-direction: column; padding: 16px; }
+        .card-actions { text-align: center; height: 48px; display: flex; justify-content: space-between; align-items: center; flex-direction: row; gap: 10px; margin-top: 16px; } 
+        .card-actions > * { flex: 1; }
+        
+        /* Clean layout reset: 
+           Ensures that single-schema child elements occupy 100% of their dynamic layout cell blocks 
+        */
+        ha-form { 
+          display: block; 
+          margin-top: 0px !important; 
         }
-        .error {
-          color: var(--error-color, red);
-          font-weight: 500;
-          margin-top: 8px;
-        }
-        ha-card {
-          max-width: 600px;
-          margin: 0 auto;
-          height: 100%;
-          justify-content: space-between;
-          flex-direction: column;
-          display: flex;
-        }
-        ha-alert, ha-form {
-          margin-top: 24px;
-          display: block;
-        }
-        .card-content {
-          display: flex;
-          justify-content: space-between;
-          flex-direction: column;
-          padding: 0 16px 16px 16px;
-        }
-        .no-header .card-content {
-          padding-top: 16px;
-        }
-        .card-actions {
-          text-align: center;
-          height: 48px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          flex-direction: row;
-          gap: 10px;
-          margin-top: 16px;
-        } 
-        .card-actions > * {
-          flex: 1;
+        
+        .form-grid-container > div {
+          width: 100%;
         }
       `,
     ];
@@ -460,7 +426,5 @@ export class FormCard extends FormBaseCard implements LovelaceCard {
 }
 
 declare global {
-  interface HTMLElementTagNameMap {
-    "form-card": FormCard;
-  }
+  interface HTMLElementTagNameMap { "form-card": FormCard; }
 }
