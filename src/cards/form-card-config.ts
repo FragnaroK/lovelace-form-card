@@ -11,6 +11,7 @@ export interface FormCardConfig extends LovelaceCardConfig {
   title?: string;
   fields: FormCardField[];
   save_label?: string;
+  save_icon?: string;
   save_actions?: ActionConfig[];
   error_actions?: ActionConfig[];
   success_actions?: ActionConfig[];
@@ -36,7 +37,7 @@ export interface FormCardField {
 
 export const fieldConfigStruct = object({
   name: string(),
-  selector: object(),
+  selector: any(), 
   label: optional(string()),
   description: optional(string()),
   entity: optional(string()),
@@ -53,7 +54,13 @@ export const formCardConfigStruct = assign(
     title: optional(string()),
     fields: array(fieldConfigStruct),
     save_label: optional(string()),
-    save_action: optional(actionConfigStruct),
+    save_icon: optional(string()), 
+    
+    save_actions: optional(array(actionConfigStruct)), 
+    error_actions: optional(array(actionConfigStruct)),
+    success_actions: optional(array(actionConfigStruct)),
+    progress_actions: optional(array(actionConfigStruct)),
+    
     spread_values_to_data: optional(boolean()),
     reset_on_submit: optional(boolean()),
     hide_undo_button: optional(boolean()),

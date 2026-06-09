@@ -23,12 +23,12 @@ import { GENERIC_LABELS } from "../utils/form/generic-fields";
 import "../components/form-card-editor-fields";
 
 const actions: UiAction[] = ["none", "perform-action"];
-const computeSchema = memoizeOne((t: LocalizeFunc): HaFormSchema[] => [
+
+// Fixed: Separate base structural options from core action schemas
+const computeBaseSchema = memoizeOne((t: LocalizeFunc): HaFormSchema[] => [
   {
     name: "title",
-    selector: {
-      text: {},
-    },
+    selector: { text: {} },
   },
   {
     type: "expandable",
@@ -54,7 +54,11 @@ const computeSchema = memoizeOne((t: LocalizeFunc): HaFormSchema[] => [
         name: "hide_undo_button",
         selector: { boolean: {} },
       },
-      ...computeActionsFormSchema("save_action", actions),
+      // Fixed: Mapped plural multi-action hooks into UI schema layout selectors
+      ...computeActionsFormSchema("save_actions", actions),
+      ...computeActionsFormSchema("progress_actions", actions),
+      ...computeActionsFormSchema("success_actions", actions),
+      ...computeActionsFormSchema("error_actions", actions),
     ],
   },
 ]);
@@ -87,8 +91,7 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
 
   protected firstUpdated(changedProps: PropertyValues): void {
     super.firstUpdated(changedProps);
-    // noinspection JSIgnoredPromiseFromCall
-    this.hass.loadFragmentTranslation("config");
+    void this.hass.loadFragmentTranslation("config");
   }
 
   connectedCallback() {
@@ -116,21 +119,22 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
       return nothing;
     }
     const localize = setupCustomlocalize(this.hass!);
-    const schema = computeSchema(localize);
+    const baseSchema = computeBaseSchema(localize);
 
     return html`
       <div class="header">
         <h2 id="fields-heading" class="name">${localize("editor.form.fields_heading.title")}</h2>
       </div>
+      
       <form-card-editor-fields
         role="region"
         aria-labelledby="fields-heading"
         .fields=${this._config?.fields}
-        .schema=${schema}
         .disable=${this.disabled}
         .hass=${this.hass}
         @value-changed=${this._fieldsChanged}
       ></form-card-editor-fields>
+      
       ${!("fields" in this._config)
         ? html`
             <ha-button
@@ -143,23 +147,24 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
             </ha-button>
           `
         : nothing}
+        
       <div class="header">
         <h2 id="form-heading" class="name">${localize("editor.form.form_heading.title")}</h2>
       </div>
+      
       <ha-form
         aria-labelledby="form-heading"
         .hass=${this.hass}
         .data=${this._config}
-        .schema=${schema}
+        .schema=${baseSchema}
         .computeLabel=${this._computeLabel}
         @value-changed=${this._valueChanged}
       ></ha-form>
     `;
   }
 
-  //
   private _addFields() {
-    if ("fields" in this._config!) {
+    if (this._config && "fields" in this._config) {
       return;
     }
     this._formFields?.addFields();
@@ -181,7 +186,7 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
   static get styles(): CSSResultGroup {
     return [
       css`
-        :host {|
+        :host {
           display: block;
         }
 
@@ -200,6 +205,7 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
         .header {
           display: flex;
           align-items: center;
+          margin-top: 16px;
         }
 
         .header:first-child {
@@ -210,10 +216,16 @@ export class FormCardEditor extends LitElement implements LovelaceCardEditor {
           font-size: 20px;
           font-weight: 400;
           flex: 1;
+          margin: 8px 0;
         }
 
         .header a {
           color: var(--secondary-text-color);
+        }
+        
+        ha-form {
+          display: block;
+          margin-top: 8px;
         }
       `,
     ];
